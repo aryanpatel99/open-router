@@ -21,7 +21,12 @@ export function useRuns() {
   }, []);
 
   const clearRuns = useCallback(async () => {
-    setRuns([]);
+    try {
+      await fetch("/api/runs", { method: "DELETE" });
+      setRuns([]);
+    } catch {
+      console.error("Failed to clear runs");
+    }
   }, []);
 
   // SSE connection for real-time updates

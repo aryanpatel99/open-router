@@ -205,3 +205,29 @@ model Trace {
 
   conversation   Conversation @relation(fields: [conversationId], references: [id])
 }
+
+model TelemetryRun {
+  id               String    @id
+  status           String
+  operation        String
+  model            String
+  provider         String?
+  startedAt        DateTime
+  completedAt      DateTime?
+  duration         Int?
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+  thoughtsTokens   Int?
+  cacheReadTokens  Int?
+  costMicros       BigInt?
+  userId           Int?
+  apiKeyId         Int?
+  steps            Json
+  input            Json
+  error            String?
+  createdAt        DateTime  @default(now())
+
+  @@index([startedAt])
+  @@index([userId, startedAt])
+}

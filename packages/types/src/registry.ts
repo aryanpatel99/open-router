@@ -1,4 +1,6 @@
 // ─── Cost Per Token ──────────────────────────────────────────
+// Prices are micros per 1M tokens (USD/token × 1e12). Per-token micros
+// would round cheap models (e.g. $0.0000003/token = 0.3µ) down to 0.
 export interface CostPerToken {
   input: bigint;
   output: bigint;

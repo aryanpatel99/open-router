@@ -1,7 +1,10 @@
 import dotenv from "dotenv";
+import crypto from "crypto";
 import express, { type Express, type Request, type Response } from "express";
 import { llmRouter } from "./router/llm-router.ts";
 import { apiKeyGate } from "./middleware/apiKeyGate.ts";
+import { keyRateLimit } from "./middleware/keyRateLimit.ts";
+import { chargeUsage } from "./billing/charge.ts";
 import type { NormalizedChatRequest } from "@repo/types";
 
 dotenv.config();
@@ -38,9 +41,9 @@ class ApiGateway {
     });
 
     // OpenAI SDK standard path with API key verification
-    this.app.post("/v1/chat/completions", apiKeyGate, this.handleChatCompletions);
+    this.app.post("/v1/chat/completions", apiKeyGate, keyRateLimit, this.handleChatCompletions);
 
-    this.app.post("/chat/completions", apiKeyGate, this.handleChatCompletions);
+    this.app.post("/chat/completions", apiKeyGate, keyRateLimit, this.handleChatCompletions);
   }
 
   private normalizeRequest(data: any): NormalizedChatRequest {
@@ -52,7 +55,7 @@ class ApiGateway {
       model_slug: model_slugs,
       messages: data.messages || [],
       temperature: data.temperature ?? 0.7,
-      retry: data.extra?.retry ?? 0,
+      retry: typeof data.extra?.retry === "number" ? data.extra.retry : undefined,
       provider: data.extra?.provider ?? "cheap",
       streaming: data.stream ?? false,
       preset: data.extra?.preset ?? false,
@@ -78,9 +81,46 @@ class ApiGateway {
         model: data.model,
       });
 
-      const response = await llmRouter.callLlm(normalized);
+      const response = await llmRouter.callLlm(normalized, {
+        userId: req.user?.id,
+        apiKeyId: req.apiKey?.id,
+      });
 
-      res.json(response);
+      // BYOK calls are billed by the provider directly
+      if (!normalized.byok && req.user && req.apiKey) {
+        try {
+          await chargeUsage(req.user.id, req.apiKey.id, response.costMicros);
+        } catch (billingError) {
+          // the user already got a response — log and don't fail the request
+          console.error("[Billing Error]", billingError);
+        }
+      }
+
+      res.json({
+        id: `chatcmpl-${crypto.randomUUID()}`,
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model: normalized.model_slug[0],
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: response.content,
+            },
+            finish_reason: response.finishReason || "stop",
+          },
+        ],
+        usage: {
+          prompt_tokens: response.promptTokens,
+          completion_tokens: response.completionTokens,
+          total_tokens: response.totalTokens,
+          thoughts_tokens: response.thoughtsTokens || undefined,
+          cache_read_tokens: response.cacheReadTokens || undefined,
+        },
+        // cost in micros (1 USD = 1,000,000 micros)
+        cost_micros: Number(response.costMicros),
+      });
     } catch (error: any) {
       console.error("[Chat Completions Error]", error);
 

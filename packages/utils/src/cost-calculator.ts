@@ -21,7 +21,7 @@ export interface UsageMetadata {
  *                    pass `providerPrefix` to prepend it.
  * @param usage     - Token counts from the provider's response
  * @param providerPrefix - Optional prefix (e.g. "google/") to prepend
- * @returns Total cost in USD (number), or 0 if model not found
+ * @returns Total cost in micros (bigint, rounded up), or 0n if model not found
  */
 export function costCalculation(
   modelSlug: string,
@@ -41,11 +41,18 @@ export function costCalculation(
 
   const { cost_per_token } = entry;
 
-  const cost =
-    BigInt(usage.promptTokenCount) * BigInt(cost_per_token.input) +
-    BigInt(usage.candidatesTokenCount) * BigInt(cost_per_token.output) +
-    BigInt(usage.thoughtsTokenCount || 0) * BigInt(cost_per_token.reasoning || 0) +
-    BigInt(usage.cacheReadTokenCount || 0) * BigInt(cost_per_token.cache_read || 0);
+  // promptTokenCount includes cached tokens — bill those at the cache rate
+  const cached = BigInt(usage.cacheReadTokenCount || 0);
+  const uncachedPrompt = BigInt(usage.promptTokenCount) - cached;
 
-  return cost;
+  // prices are micros per 1M tokens
+  const scaled =
+    (uncachedPrompt > 0n ? uncachedPrompt : 0n) * BigInt(cost_per_token.input) +
+    BigInt(usage.candidatesTokenCount) * BigInt(cost_per_token.output) +
+    BigInt(usage.thoughtsTokenCount || 0) *
+      BigInt(cost_per_token.reasoning ?? cost_per_token.output) +
+    cached * BigInt(cost_per_token.cache_read ?? cost_per_token.input);
+
+  // round up so tiny requests are never free
+  return (scaled + 999_999n) / 1_000_000n;
 }

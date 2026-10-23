@@ -3,15 +3,10 @@
 import { useState } from "react";
 import type { Step } from "@/lib/telemetry";
 import { Separator } from "@/components/ui/separator";
+import { formatCost, formatDuration } from "@/lib/utils";
 
 interface StepDetailProps {
   step: Step;
-}
-
-function formatDuration(ms?: number): string {
-  if (!ms) return "—";
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
 }
 
 function CollapsibleSection({
@@ -56,8 +51,8 @@ export function StepDetail({ step }: StepDetailProps) {
               step.status === "success"
                 ? "bg-emerald-600/20 text-emerald-400"
                 : step.status === "error"
-                ? "bg-red-600/20 text-red-400"
-                : "bg-yellow-600/20 text-yellow-400"
+                  ? "bg-red-600/20 text-red-400"
+                  : "bg-yellow-600/20 text-yellow-400"
             }`}
           >
             {step.status}
@@ -68,7 +63,7 @@ export function StepDetail({ step }: StepDetailProps) {
         </div>
       </div>
 
-      {/* Step body: Request / Response split */}
+      {/* Request / Response split */}
       <div className="grid grid-cols-2 divide-x divide-border">
         {/* Request */}
         <div className="p-5 space-y-4">
@@ -81,9 +76,16 @@ export function StepDetail({ step }: StepDetailProps) {
             <p className="text-sm">{step.request.model}</p>
           </div>
 
+          {step.request.provider_strategy && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Strategy</p>
+              <p className="text-sm font-mono">{step.request.provider_strategy}</p>
+            </div>
+          )}
+
           <div>
             <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Messages</p>
-            <pre className="text-xs bg-muted rounded-md p-3 overflow-x-auto max-h-48 whitespace-pre-wrap break-words font-mono">
+            <pre className="text-xs bg-muted rounded-md p-3 overflow-x-auto max-h-48 whitespace-pre-wrap wrap-break-word font-mono">
               {JSON.stringify(step.request.messages, null, 2)}
             </pre>
           </div>
@@ -98,7 +100,7 @@ export function StepDetail({ step }: StepDetailProps) {
           )}
 
           <CollapsibleSection title="Raw Request">
-            <pre className="text-xs bg-muted rounded-md p-3 overflow-x-auto max-h-64 whitespace-pre-wrap break-words font-mono">
+            <pre className="text-xs bg-muted rounded-md p-3 overflow-x-auto max-h-64 whitespace-pre-wrap wrap-break-word font-mono">
               {JSON.stringify(step.request, null, 2)}
             </pre>
           </CollapsibleSection>
@@ -114,11 +116,12 @@ export function StepDetail({ step }: StepDetailProps) {
             <>
               <div>
                 <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Content</p>
-                <p className="text-sm bg-muted rounded-md p-3 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
+                <p className="text-sm bg-muted rounded-md p-3 whitespace-pre-wrap wrap-break-word max-h-48 overflow-y-auto">
                   {step.response.content}
                 </p>
               </div>
 
+              {/* Token breakdown */}
               {(step.response.promptTokens !== undefined ||
                 step.response.completionTokens !== undefined) && (
                 <div>
@@ -135,7 +138,41 @@ export function StepDetail({ step }: StepDetailProps) {
                     {step.response.totalTokens !== undefined && (
                       <p>Total: {step.response.totalTokens}</p>
                     )}
+                    {!!step.response.thoughtsTokens && (
+                      <p className="text-violet-400">
+                        Thoughts: {step.response.thoughtsTokens}
+                      </p>
+                    )}
+                    {!!step.response.cacheReadTokens && (
+                      <p className="text-sky-400">
+                        Cache read: {step.response.cacheReadTokens}
+                      </p>
+                    )}
                   </div>
+                </div>
+              )}
+
+              {/* Cost */}
+              <div>
+                <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Cost</p>
+                <p className={`text-sm font-mono ${step.response.costMicros ? "text-emerald-400" : "text-muted-foreground"}`}>
+                  {formatCost(step.response.costMicros)}
+                  {step.response.costMicros !== undefined && (
+                    <span className="text-xs text-muted-foreground ml-2">
+                      ({step.response.costMicros.toLocaleString()} µ)
+                    </span>
+                  )}
+                </p>
+              </div>
+
+              {step.response.finishReason && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">
+                    Finish Reason
+                  </p>
+                  <span className="text-sm px-2 py-0.5 rounded bg-muted font-mono">
+                    {step.response.finishReason}
+                  </span>
                 </div>
               )}
 
@@ -153,14 +190,14 @@ export function StepDetail({ step }: StepDetailProps) {
               {step.response.actualModel && (
                 <div>
                   <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">
-                    Actual Model
+                    Actual Model Version
                   </p>
-                  <p className="text-sm">{step.response.actualModel}</p>
+                  <p className="text-sm font-mono">{step.response.actualModel}</p>
                 </div>
               )}
 
               <CollapsibleSection title="Raw Response">
-                <pre className="text-xs bg-muted rounded-md p-3 overflow-x-auto max-h-64 whitespace-pre-wrap break-words font-mono">
+                <pre className="text-xs bg-muted rounded-md p-3 overflow-x-auto max-h-64 whitespace-pre-wrap wrap-break-word font-mono">
                   {JSON.stringify(step.response, null, 2)}
                 </pre>
               </CollapsibleSection>
@@ -168,7 +205,7 @@ export function StepDetail({ step }: StepDetailProps) {
           ) : step.error ? (
             <div>
               <p className="text-xs text-red-400 mb-1 uppercase tracking-wider">Error</p>
-              <p className="text-sm text-red-300 font-mono bg-red-950/30 rounded-md p-3 break-words">
+              <p className="text-sm text-red-300 font-mono bg-red-950/30 rounded-md p-3 wrap-break-word">
                 {step.error}
               </p>
             </div>
