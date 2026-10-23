@@ -12,7 +12,7 @@ export function Header({ connected, onRefresh, onClear }: HeaderProps) {
       <div className="flex items-center gap-3">
 
         <h1 className="text-lg font-semibold tracking-tight">
-          <span className="text-foreground">OpenRouter</span>
+          <span className="text-foreground">Orbyt</span>
           <span className="text-muted-foreground ml-1.5 font-normal">DevTools</span>
         </h1>
       </div>

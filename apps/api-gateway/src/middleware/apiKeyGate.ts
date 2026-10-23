@@ -32,7 +32,6 @@ export async function apiKeyGate(
     const authHeader = req.headers["authorization"];
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      console.log("[API Key Gate] Missing or invalid auth header:", authHeader?.substring(0, 20));
       res.status(401).json({
         error: {
           message: "Missing or invalid authorization header",
@@ -46,8 +45,6 @@ export async function apiKeyGate(
     const token = authHeader.slice(7).trim(); // Remove "Bearer " prefix
     const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
-    console.log("[API Key Gate] Looking for key hash:", tokenHash.substring(0, 16) + "...");
-
     // Find the API key in database
     const apiKey = await prisma.platformUserApiKey.findUnique({
       where: { keyHash: tokenHash },
@@ -55,7 +52,6 @@ export async function apiKeyGate(
     });
 
     if (!apiKey) {
-      console.log("[API Key Gate] No API key found for hash");
       res.status(401).json({
         error: {
           message: "Invalid API key",
@@ -66,10 +62,7 @@ export async function apiKeyGate(
       return;
     }
 
-    console.log("[API Key Gate] Found API key:", apiKey.name, "for user:", apiKey.user.clerkUserId);
-
     if (!apiKey.isActive) {
-      console.log("[API Key Gate] API key is inactive");
       res.status(401).json({
         error: {
           message: "API key is inactive",
@@ -80,13 +73,41 @@ export async function apiKeyGate(
       return;
     }
 
+    // BYOK calls are paid by the user's own provider key — don't gate on credits
+    const usesByok =
+      typeof req.body?.extra?.byok === "string" && req.body.extra.byok.trim() !== "";
+
+    if (!usesByok && apiKey.user.credits <= 0n) {
+      res.status(402).json({
+        error: {
+          message: "Insufficient credits. Add credits to continue.",
+          type: "insufficient_quota",
+          code: "insufficient_credits",
+        },
+      });
+      return;
+    }
+
+    if (
+      !usesByok &&
+      apiKey.budgetLimit !== null &&
+      apiKey.creditsUsed >= apiKey.budgetLimit
+    ) {
+      res.status(402).json({
+        error: {
+          message: "API key budget limit reached",
+          type: "insufficient_quota",
+          code: "budget_limit_exceeded",
+        },
+      });
+      return;
+    }
+
     // Update last used timestamp
     await prisma.platformUserApiKey.update({
       where: { id: apiKey.id },
       data: { lastUsedAt: new Date() },
     });
-
-    console.log("[API Key Gate] ✓ Authentication successful");
 
     // Attach API key and user info to request
     req.apiKey = {

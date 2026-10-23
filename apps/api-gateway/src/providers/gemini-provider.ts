@@ -2,11 +2,31 @@ import { GoogleGenAI } from "@google/genai";
 import { costCalculation } from "@repo/utils";
 import type { ChatMessage } from "@repo/types";
 
-export interface AIProvider {
-  providerName: string;
-  generateChat(modelSlug: string, messages: ChatMessage[], options: any, apiKey: string): Promise<any>;
+// ─── Structured response all providers must return ────────────
+export interface ProviderResponse {
+  content: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  thoughtsTokens: number;
+  cacheReadTokens: number;
+  costMicros: bigint;
+  finishReason: string;
+  modelVersion: string;
 }
 
+// ─── Provider contract ────────────────────────────────────────
+export interface AIProvider {
+  providerName: string;
+  generateChat(
+    modelSlug: string,
+    messages: ChatMessage[],
+    options: any,
+    apiKey: string,
+  ): Promise<ProviderResponse>;
+}
+
+// ─── Gemini implementation ────────────────────────────────────
 export class GeminiProvider implements AIProvider {
   providerName = "gemini";
 
@@ -14,55 +34,68 @@ export class GeminiProvider implements AIProvider {
     modelSlug: string,
     messages: ChatMessage[],
     options: any,
-    apiKey: string
-  ): Promise<any> {
-    console.log(messages)
-    const client = new GoogleGenAI({
-      apiKey: apiKey,
-    });
-    
-    const system = messages.find(m => m.role === 'system')?.content || "You are a helpful assistant.";
-    const user = messages.filter(m => m.role === 'user').map(m => m.content).join('\n');
+    apiKey: string,
+  ): Promise<ProviderResponse> {
+    const client = new GoogleGenAI({ apiKey });
+
+    const system =
+      messages
+        .filter((m) => m.role === "system")
+        .map((m) => m.content)
+        .join("\n") || "You are a helpful assistant.";
+
+    // Gemini uses "model" for assistant turns; keep full history in order
+    const contents = messages
+      .filter((m) => m.role !== "system")
+      .map((m) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }],
+      }));
 
     const response = await client.models.generateContent({
       model: modelSlug,
-      contents: user,
+      contents,
       config: {
         systemInstruction: system,
-      }
+        temperature: options?.temperature,
+      },
     });
 
-    const cost = costCalculation(modelSlug, response.usageMetadata as any, "google/");
-    console.log("cost from gemini provider:", cost);
+    const usage = (response.usageMetadata ?? {}) as {
+      promptTokenCount?: number;
+      candidatesTokenCount?: number;
+      totalTokenCount?: number;
+      thoughtsTokenCount?: number;
+      cachedContentTokenCount?: number;
+    };
 
-    return response.text;
+    const promptTokens = usage.promptTokenCount ?? 0;
+    const completionTokens = usage.candidatesTokenCount ?? 0;
+    const totalTokens = usage.totalTokenCount ?? 0;
+    const thoughtsTokens = usage.thoughtsTokenCount ?? 0;
+    const cacheReadTokens = usage.cachedContentTokenCount ?? 0;
+
+    const costMicros = costCalculation(
+      modelSlug,
+      {
+        promptTokenCount: promptTokens,
+        candidatesTokenCount: completionTokens,
+        thoughtsTokenCount: thoughtsTokens,
+        cacheReadTokenCount: cacheReadTokens,
+      },
+      "google/",
+    );
+
+    return {
+      content: response.text ?? "",
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      thoughtsTokens,
+      cacheReadTokens,
+      costMicros,
+      finishReason: response.candidates?.[0]?.finishReason?.toString() ?? "stop",
+      modelVersion: response.modelVersion ?? modelSlug,
+    };
   }
 }
-
-// GenerateContentResponse {
-//   sdkHttpResponse: {
-//     headers: {
-//       'alt-svc': 'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000',
-//       'content-encoding': 'gzip',
-//       'content-type': 'application/json; charset=UTF-8',
-//       date: 'Sat, 14 Mar 2026 04:49:31 GMT',
-//       server: 'scaffolding on HTTPServer2',
-//       'server-timing': 'gfet4t7; dur=781',
-//       'transfer-encoding': 'chunked',
-//       vary: 'Origin, X-Origin, Referer',
-//       'x-content-type-options': 'nosniff',
-//       'x-frame-options': 'SAMEORIGIN',
-//       'x-xss-protection': '0'
-//     }
-//   },
-//   candidates: [ { content: [Object], finishReason: 'STOP', index: 0 } ],
-//   modelVersion: 'gemini-2.5-flash',
-//   responseId: '2ui0ae_sMKrVg8UP8tiYwAg',
-//   usageMetadata: {
-//     promptTokenCount: 8,
-//     candidatesTokenCount: 8,
-//     totalTokenCount: 39,
-//     promptTokensDetails: [ [Object] ],
-//     thoughtsTokenCount: 23
-//   }
-// }

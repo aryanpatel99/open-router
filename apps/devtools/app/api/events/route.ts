@@ -1,21 +1,15 @@
 import { NextResponse } from "next/server";
-
-const encoder = new TextEncoder();
-
-// Store connected SSE clients
-const clients = new Set<ReadableStreamDefaultController>();
+import { addClient, removeClient } from "@/lib/events";
 
 export async function GET() {
+  let client: ReadableStreamDefaultController;
   const stream = new ReadableStream({
     start(controller) {
-      clients.add(controller);
-
-      // Send initial connection event
-      const msg = `data: ${JSON.stringify({ type: "connected" })}\n\n`;
-      controller.enqueue(encoder.encode(msg));
+      client = controller;
+      addClient(controller);
     },
-    cancel(controller) {
-      clients.delete(controller);
+    cancel() {
+      removeClient(client);
     },
   });
 
@@ -27,18 +21,3 @@ export async function GET() {
     },
   });
 }
-
-// Called by notify POST — broadcast to all SSE clients
-export function broadcastUpdate() {
-  const message = `data: ${JSON.stringify({ type: "update", timestamp: Date.now() })}\n\n`;
-  const encoded = encoder.encode(message);
-  for (const controller of clients) {
-    try {
-      controller.enqueue(encoded);
-    } catch {
-      clients.delete(controller);
-    }
-  }
-}
-
-

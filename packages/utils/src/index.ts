@@ -4,6 +4,7 @@
 export {
   MICRO_SCALE,
   toMicros,
+  toMicrosPerMillion,
   toDollars,
   formatCurrency,
 } from "./currency.ts";

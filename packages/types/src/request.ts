@@ -3,7 +3,7 @@ export type ProviderStrategy = "cheap" | "latency" | "throughput" | "auto";
 
 // ─── Chat Message ────────────────────────────────────────────
 export interface ChatMessage {
-  role: "system" | "user";
+  role: "system" | "user" | "assistant";
   content: string;
 }
 
@@ -13,7 +13,8 @@ export interface NormalizedChatRequest {
   messages: ChatMessage[];
 
   temperature: number;
-  retry: number;
+  // number of retries per provider; undefined → gateway default
+  retry?: number;
 
   provider: ProviderStrategy;
   streaming: boolean;

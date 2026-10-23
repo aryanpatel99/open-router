@@ -13,10 +13,12 @@ export interface StepResponse {
   completionTokens?: number;
   totalTokens?: number;
   thoughtsTokens?: number;
+  cacheReadTokens?: number;
+  // stored as number (micros) — bigint is not JSON-serialisable
+  costMicros?: number;
   finishReason?: string;
   actualModel?: string;
   provider?: string;
-  cost?: number;
 }
 
 export interface Step {
@@ -44,7 +46,11 @@ export interface Run {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
-  cost?: number;
+  thoughtsTokens?: number;
+  cacheReadTokens?: number;
+  costMicros?: number;
+  userId?: number;
+  apiKeyId?: number;
   steps: Step[];
   input: StepRequest;
   error?: string;

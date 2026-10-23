@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { broadcastUpdate } from "../events/route";
+import { broadcastUpdate } from "@/lib/events";
 
 export async function POST() {
   broadcastUpdate();

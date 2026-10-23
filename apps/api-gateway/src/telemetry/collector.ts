@@ -3,16 +3,25 @@ import type { Run, Step, StepRequest, StepResponse } from "./types.ts";
 import { saveRun } from "./storage.ts";
 import { notifyDevtools } from "./notifier.ts";
 
+export interface RunOwner {
+  userId?: number;
+  apiKeyId?: number;
+}
+
 export class TelemetryCollector {
   private run: Run;
+  // serializes writes so an older snapshot never overwrites a newer one
+  private saveQueue: Promise<void> = Promise.resolve();
 
-  constructor(input: StepRequest) {
+  constructor(input: StepRequest, owner: RunOwner = {}) {
     this.run = {
       id: crypto.randomUUID(),
       status: "pending",
       operation: "chat",
       model: input.model,
       startedAt: Date.now(),
+      userId: owner.userId,
+      apiKeyId: owner.apiKeyId,
       steps: [],
       input,
     };
@@ -75,12 +84,15 @@ export class TelemetryCollector {
     this.run.promptTokens = response.promptTokens;
     this.run.completionTokens = response.completionTokens;
     this.run.totalTokens = response.totalTokens;
-    this.run.cost = response.cost;
+    this.run.thoughtsTokens = response.thoughtsTokens;
+    this.run.cacheReadTokens = response.cacheReadTokens;
+    this.run.costMicros = response.costMicros;
 
     this.save();
   }
 
   failRun(error: string): void {
+    if (this.run.status === "error") return;
     this.run.status = "error";
     this.run.completedAt = Date.now();
     this.run.duration = this.run.completedAt - this.run.startedAt;
@@ -92,11 +104,11 @@ export class TelemetryCollector {
   // ─── Persistence ─────────────────────────────────────────────
 
   private save(): void {
-    try {
-      saveRun(this.run);
-      notifyDevtools().catch(() => {});
-    } catch {
-      // Never break the LLM call
-    }
+    // snapshot now — the run object keeps mutating while writes are queued
+    const snapshot: Run = structuredClone(this.run);
+    this.saveQueue = this.saveQueue
+      .then(() => saveRun(snapshot))
+      .then(() => notifyDevtools())
+      .catch(() => {}); // never throw into the LLM call
   }
 }

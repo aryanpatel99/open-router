@@ -9,6 +9,14 @@ export function toMicros(dollars: number): bigint {
 }
 
 /**
+ * Converts a per-token dollar price to micros per 1M tokens (bigint).
+ * Example: 0.0000003 -> 300000n
+ */
+export function toMicrosPerMillion(dollarsPerToken: number): bigint {
+  return BigInt(Math.round(dollarsPerToken * MICRO_SCALE * 1_000_000));
+}
+
+/**
  * Converts a micro amount (bigint or number) back to dollars (number).
  * Example: 1500000n -> 1.50
  */
