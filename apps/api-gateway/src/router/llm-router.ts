@@ -1,4 +1,9 @@
-import { type AIProvider, type ProviderResponse, GeminiProvider } from "../providers/gemini-provider.ts";
+import {
+  type AIProvider,
+  type ProviderResponse,
+  type DeltaHandler,
+  GeminiProvider,
+} from "../providers/gemini-provider.ts";
 import type { NormalizedChatRequest } from "@repo/types";
 import { modelProvider } from "@repo/config";
 import { messageTransformer } from "../transform/message-transformer.ts";
@@ -10,6 +15,23 @@ import "dotenv/config";
 
 // cap user-supplied retries so one request can't hammer a provider
 const MAX_USER_RETRIES = 5;
+
+export interface CallOptions {
+  // set → stream the response, calling onDelta with each text chunk
+  onDelta?: DeltaHandler;
+  // aborted when the client disconnects
+  signal?: AbortSignal;
+}
+
+// Thrown once output has already reached the client: retrying or falling
+// back would send a second, different answer, so the router must stop.
+export class StreamInterruptedError extends Error {
+  constructor(cause: unknown) {
+    super((cause as Error)?.message || String(cause));
+    this.name = "StreamInterruptedError";
+    this.cause = cause;
+  }
+}
 
 export class LLMRouter {
   private providers: Map<string, AIProvider>;
@@ -50,9 +72,12 @@ export class LLMRouter {
     normalized: NormalizedChatRequest,
     collector: TelemetryCollector,
     providerName: string,
+    callOptions: CallOptions,
   ): Promise<ProviderResponse> {
     let lastError: any;
     const maxAttempts = this.maxAttemptsFor(normalized);
+    const { onDelta, signal } = callOptions;
+    const providerOptions = { temperature: normalized.temperature, signal };
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const stepIndex = collector.startStep(modelName, providerName, {
@@ -62,18 +87,31 @@ export class LLMRouter {
         provider_strategy: normalized.provider,
       });
 
+      let emitted = false;
+
       try {
         const apiKey = this.getApiKey(normalized.byok);
         if (normalized.byok) {
           console.log(`[BYOK] Using user-provided API key for ${modelName}`);
         }
 
-        const result = await providerInstance.generateChat(
-          modelName,
-          normalized.messages,
-          normalized,
-          apiKey,
-        );
+        const result = onDelta
+          ? await providerInstance.streamChat(
+              modelName,
+              normalized.messages,
+              providerOptions,
+              apiKey,
+              (text) => {
+                emitted = true;
+                onDelta(text);
+              },
+            )
+          : await providerInstance.generateChat(
+              modelName,
+              normalized.messages,
+              providerOptions,
+              apiKey,
+            );
 
         collector.completeStep(stepIndex, {
           content: result.content,
@@ -92,6 +130,11 @@ export class LLMRouter {
       } catch (error) {
         lastError = error;
         collector.failStep(stepIndex, (error as Error).message || String(error));
+
+        // tokens already sent, or the client left: no retry, no fallback
+        if (emitted || signal?.aborted) {
+          throw new StreamInterruptedError(error);
+        }
 
         const action = decide(error, attempt, maxAttempts);
 
@@ -119,6 +162,7 @@ export class LLMRouter {
   async callLlm(
     normalized: NormalizedChatRequest,
     owner: RunOwner = {},
+    callOptions: CallOptions = {},
   ): Promise<ProviderResponse> {
     const collector = new TelemetryCollector(
       {
@@ -169,6 +213,7 @@ export class LLMRouter {
               { ...normalized, messages },
               collector,
               providerMeta.provider,
+              callOptions,
             );
 
             console.log(`[Stage 6: Success] Response received from ${providerMeta.provider}`);
@@ -188,6 +233,8 @@ export class LLMRouter {
 
             return response;
           } catch (error) {
+            if (error instanceof StreamInterruptedError) throw error;
+
             // retries are already exhausted inside executeWithRetry, so
             // classify this as the final attempt (retryable → fallback)
             const action = decide(error, Infinity, 1);
